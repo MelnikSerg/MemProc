@@ -54,25 +54,39 @@ def Gen_mu(T, nu, sigma, dt, Npoints):
         X0 = X[i-1] - (nu*X[i-1] + mem)*dt
         
         X.append(random.gauss(X0, sigma))
-        print(X[-1])
+        #print(X[-1])
 
-def SaveXToFile_CSV(FileName):
-    """Save X(t) list to the csv file"""
+def SaveDataToFile_CSV(FileName, Data):
+    """Save Data[] list to the csv file"""
     with open(FileName, 'w') as WFile:
         writer = csv.writer(WFile)
-        writer.writerow(X)
+        writer.writerow(Data)
         
-def SaveXToFile_Column(FileName):
-    """Save X(t) list to the text file as one column"""
+def SaveDataToFile_Column(FileName, Data):
+    """Save Data[] list to the text file as one column"""
     f = open(FileName, 'w')
-    for x in X:
+    for x in Data:
         f.write(str(x) + '\r\n')
     f.close()
 
-#Gen_mu_Delta(1, 1.0, 0.0, 1, 0.1, 10000)
-#Gen_mu_Step(1, 4, 0, 1, 0.1, 1000)
-Gen_mu(1, 1, 1, 0.1, 1000)
-print(X[-1])
+def CalcCor(t_max):
+    """Correlator Calculation"""
+    C = []
+    for t in range(1, t_max):
+        Ct = 0
+        for i in range(len(X)-t):
+            Ct += X[i]*X[i+t]
+        C.append(Ct/(len(X)-t))
+        print(t, ":", C[-1])
+    return C
 
-#SaveXToFileCSV('delta.csv')
-SaveXToFile_Column('X(t).dat')
+
+
+#Gen_mu_Delta(1, 1.5, 0.0, 1, 0.1, 10000)
+#Gen_mu_Step(1, 1, 0, 1, 0.1, 1000)
+Gen_mu(1, 5, 1, 0.1, 100000)
+print("Last value X[", len(X), "] = ", X[-1])
+#SaveDataToFile_Column('X(t).dat', X)
+
+C = CalcCor(100)
+SaveDataToFile_Column('C(t).dat', C)
