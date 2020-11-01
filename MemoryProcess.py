@@ -3,224 +3,274 @@ import random
 import csv
 import numpy
 import matplotlib.pyplot as plt
+from enum import Enum
 
-X = []  #list of X values
+class Process:
 
-def Gen_mu_Delta(T, mu0, nu, sigma, dt, Npoints):
-    """Genetare process X(t) by the memory function mu(t) = delta(t-T)"""
+    class MemoryType(Enum):
+        NULL = 0
+        DELTA = 1
+        STEP = 2
+        EXP = 3
+        FUNCTION = 4
+        LIST_MEM = 5
+        LIST_COR = 6
+
+    def __init__(self, n_points = 0, memory_type = MemoryType.NULL, T = 1.0, mu0 = 0.0, nu = 0.0, sigma = 1.0, dt = 1.0, vals_mem = []):
+        self.memory_type = memory_type
+        self.T = T
+        self.mu0 = mu0
+        self.nu = nu
+        self.sigma = sigma
+        self.dt = dt
+        self.n_points = n_points
+        self.vals_mem = vals_mem[:]
+        self.x = []
     
-    random.seed(version=2)  #initializing random generator
-    X.clear                 #clear the list
-    X.append(0)             #start value is zero
-    Tint = int(T/dt)        #T in units of dt
+    def generate(self):
+        """Generate process x(t)"""
 
-    #main loop
-    for i in range(1, Npoints):
-        X0 = X[i-1]*(1.0-nu*dt)
-        if(i > Tint): X0 -= X[i-Tint]*mu0*dt
-        X.append(random.gauss(X0, sigma))
-
-def Gen_mu_Step(T, mu0, nu, sigma, dt, Npoints):
-    """Genetare process X(t) by the memory function mu(t<T) = mu0"""
-    
-    random.seed(version=2)  #initializing random generator
-    X.clear                 #clear the list
-    X.append(0)             #start value is zero
-    Tint = int(T/dt+0.5)        #T in units of dt
-
-    #main loop
-    mem = 0.0   #memory component
-    for i in range(1, Npoints):
-        mem += X[i-1]*mu0*dt
-        if(i > Tint): mem -= X[i-1-Tint]*mu0*dt
-        X0 = X[i-1] - (nu*X[i-1] + mem)*dt
+        random.seed(version=2)  #initializing random generator
+        self.x = []             #clear the list
+        self.x.append(0)        #start value is zero
         
-        X.append(random.gauss(X0, sigma))
+        c = self.mu0*self.dt
+        e = math.exp(-self.dt/self.T)
+        Tint = int(self.T/self.dt + 0.5)
+        sig_dt = self.sigma*math.sqrt(self.dt)
 
-def Gen_mu(T, nu, sigma, dt, Npoints):
-    """Genetare process X(t) by the given memory function mu(t<T)"""
+        #main loop
+        mem = 0.0
+        for i in range(1, self.n_points):
+            #recalc memory part
+            if self.memory_type == Process.MemoryType.EXP:
+                mem = (mem + self.x[-1]*c)*e
+            elif self.memory_type == Process.MemoryType.DELTA:
+                if(i >= Tint):
+                    mem = self.x[i-Tint]*self.mu0
+            elif self.memory_type == Process.MemoryType.STEP:
+                mem += self.x[i-1]*self.mu0*self.dt
+                if(i > Tint): mem -= self.x[i-1-Tint]*self.mu0*self.dt
+            elif self.memory_type == Process.MemoryType.FUNCTION:
+                mem = 0.0
+                for r in range(1, min(i, Tint)):
+                    t = r*self.dt
+                    mu = math.exp(-1.2*t)   #MEMORY FUNCTION/mu0
+                    mem += self.x[i-r]*mu
+                mem *= self.mu0*self.dt
+            elif self.memory_type == Process.MemoryType.LIST_MEM:
+                mem = 0
+                for r in range(1, min(i, len(self.vals_mem))):
+                    mem += self.x[i-r]*self.vals_mem[r]
+                mem *= self.dt
+
+            x0 = self.x[-1] - (self.nu*self.x[-1] + mem)*self.dt    #new center value
+            self.x.append(random.gauss(x0, sig_dt))                 #generate with Gauss distribution
     
-    random.seed(version=2)  #initializing random generator
-    X.clear                 #clear the list
-    X.append(0)             #start value is zero
-    Tint = int(T/dt)        #T in units of dt
+    def set_mu0_to_diffusiveborder(self):
+        if self.memory_type == Process.MemoryType.EXP:
+            self.mu0 = -self.nu/self.dt*(math.exp(self.dt/self.T) - 1)
+        elif self.memory_type == Process.MemoryType.DELTA:
+            self.mu0 = -self.nu
+        elif self.memory_type == Process.MemoryType.STEP:
+            Tint = int(self.T/self.dt + 0.5)
+            self.mu0 = -self.nu/(Tint*self.dt)
+        else:
+            print('The method set_mu0_to_diffusiveborder is not supported for this memory type')
 
-    #main loop
-    for i in range(1, Npoints):
-        mem = 0.0   #memory component
-        for r in range(1, min(i, Tint)):
-            t = r*dt
-            mu = 0.1*math.exp(-1.2*t)
-            mem += X[i-r]*mu*dt
+    def save_process(self, fileName):
+        """Save process to the text file as two column (t; x)"""
+
+        auto_round_pow = int(-math.log10(self.dt))+1
+
+        with open(fileName, 'w') as f:
+            t = 0
+            for x in self.x:
+                f.write(str(round(t,auto_round_pow)) + '\t' + str(x) + '\n')
+                t += self.dt
+    
+    def autocorrelation(self, t_max):
+        """Correlator Calculation"""
+        cor = []
+        n_t = int(t_max/self.dt)
+        x_aver2 = numpy.average(self.x) ** 2
+        for i_t in range(n_t+1):
+            Ct = 0
+            for i in range(len(self.x)-i_t):
+                Ct += self.x[i]*self.x[i+i_t]
+            cor.append(Ct/(len(self.x)-i_t) - x_aver2)
+        return cor
+    
+    def gen_by_corr(self, C):
+        """Genetare process X(t) by the given correlation function C(t) (defined as list)"""
+        #make a matrix for the Linear equations system
+        N = len(C)-1
+        A = [0.0]*N
+        B = [0.0]*N
+        for n in range(N):
+            A[n]=[0.0]*N
+            for r in range(N):
+                A[n][r]=C[abs(n-r)]
+            B[n] = C[n]-C[n+1]
+    
+        #solving the system for dt^2 * mu[t]
+        t2mu = numpy.linalg.solve(A, B)
+
+        #sqrt(tau)* sigma
+        tsigma = math.sqrt(2.0*(C[0]-C[1]))
+
+        #main loop
+        self.x = [0]
+        for n in range(1, self.n_points):
+            #calc Xc - gaussian center for the next X value
+            Xc = self.x[-1]
+            for r in range(min(N,n)):
+                Xc -= t2mu[r]*self.x[-1-r]
+            #generate new value by gaussian
+            self.x.append(random.gauss(Xc, tsigma))
+
+    def сalc_сorr_norm(self, t_max):
+        """Calculate normalized C[t] (C[0]=1) corresponding to given mu[t] and nu"""
+
+        n_t = int(t_max/self.dt + 0.5)
+
+        #put nu into mu[0]
+        self.vals_mem[0] = self.nu/self.dt
+    
+        #calculate h(t)
+        h = [1.0]
+        for i in range(n_t):
+            dh_t = 0.0
+            for j in range(min(i,len(self.vals_mem))):
+                dh_t -= self.vals_mem[j]*h[-1-j]
+            dh_t *= self.dt
+            h.append(h[-1]+dh_t*self.dt)
+
+        #calculate correlator
+        corr = []
+        for i in range(n_t):
+            Ct = 0
+            for j in range(len(h)-i):
+                Ct += h[j]*h[j+i]
+            Ct *= self.dt
+            corr.append(Ct)
+
+        #normalize
+        kC = 1.0/corr[0]
+        corr = numpy.array(corr) * kC
         
-        X0 = X[i-1] - (nu*X[i-1] + mem)*dt
+        return corr
         
-        X.append(random.gauss(X0, sigma))
-
-def Gen_Cor(C, Npoints):
-    """Genetare process X(t) by the given correlation function C(t) (defined as list)"""
-    #make a matrix for the Linear equations system
-    N = len(C)-1
-    A = [0.0]*N
-    B = [0.0]*N
-    for n in range(N):
-        A[n]=[0.0]*N
-        for r in range(N):
-            A[n][r]=C[abs(n-r)]
-        B[n] = C[n]-C[n+1]
-    
-    #solving the system relative to tau^2 * mu
-    t2mu = numpy.linalg.solve(A, B)
-
-    #sqrt(tau)* sigma
-    tsigma = math.sqrt(2.0*(C[0]-C[1]))
-
-    #creating new list of X(t) values
-    X.clear
-    #main loop
-    Xc = 0.0    #gaussian center for the next X value
-    for n in range(Npoints):
-        #recalc Xc
-        if(n > 0): Xc = X[-1]
-        for r in range(min(N,n)):
-            Xc -= t2mu[r]*X[-1-r]
-        #generate new value by gaussian
-        X.append(random.gauss(Xc, tsigma))
-
-
-def Calc_Cor_Norm(mu, nu, dt, Nt):
-    """Calculate normalized C[t] (C[0]=1) corresponding to given mu[t] and nu"""
-    #put nu into mu[0]
-    mu[0]=nu/dt
-    
-    #calc h(t)
-    i = 0
-    h = []
-    h.append(1.0)
-    for i in range(Nt):
-        dh_t = 0.0
-        for j in range(min(i,len(mu))):
-            dh_t -= mu[j]*h[-1-j]
-        dh_t *= dt
-        h.append(h[-1]+dh_t*dt)
-    #SaveDataToFile_Column('h(i_t).dat', h)
-
-    #calc Cor
-    C = []
-    for i in range(Nt):
-        Ct = 0
-        for j in range(len(h)-i):
-            Ct += h[j]*h[j+i]
-        Ct *= dt
-        C.append(Ct)
-
-    #normalize
-    kC = 1.0/C[0]
-    for i in range(Nt):
-        C[i] *= kC
-
-    return C
-
-
-def SaveDataToFile_CSV(FileName, Data):
-    """Save Data[] list to the csv file"""
-    with open(FileName, 'w') as WFile:
-        writer = csv.writer(WFile)
-        writer.writerow(Data)
+    def save_data_to_file_csv(file_name, data):
+        """Save data[] list to the csv file"""
+        with open(file_name, 'w') as w_file:
+            writer = csv.writer(w_file)
+            writer.writerow(data)
         
-def SaveDataToFile_Column(FileName, Data):
-    """Save Data[] list to the text file as one column"""
-    f = open(FileName, 'w')
-    for x in Data:
-        f.write(str(x) + '\r\n')
-    f.close()
-    print('Data saved')
+    def save_data_to_file_column(file_name, data):
+        """Save data[] list to the text file as one column"""
+        with open(file_name, 'w') as w_file:
+            for x in data:
+                w_file.write(str(x) + '\n')
 
-def SaveDataToFile_TwoColumn(FileName, Data, t0, dt):
-    """Save Data[] list to the text file as two column (t; x)"""
-    f = open(FileName, 'w')
-    t = t0
-    for x in Data:
-        f.write(str(t) + '\t' + str(x) + '\r\n')
-        t += dt
-    f.close()
+    def save_data_to_file_twocolumn(file_name, data, t0, dt):
+        """Save data[] list to the text file as two column (t; x)"""        
+        t = t0
+        with open(file_name, 'w') as w_file:
+            for x in data:
+                w_file.write(str(t) + '\t' + str(x) + '\n')
+                t += dt
 
-def CalcCor(t_max):
-    """Correlator Calculation"""
-    C = []
-    for t in range(1, t_max):
-        Ct = 0
-        for i in range(len(X)-t):
-            Ct += X[i]*X[i+t]
-        C.append(Ct/(len(X)-t))
-        #print(t, ":", C[-1])
-    return C
+    def calc_snr(self):
+        """Signal-to-Noise ratio"""
 
-def DrawProcess(dt):
-    T = numpy.arange(0, len(X)*dt, dt)
-    plt.plot(T, X)
-    plt.xlabel('t')
-    plt.ylabel('X')
-    plt.show()
+        # fit frequency w
+        xx = 0
+        xx2 = 0
+        for i in range(1, len(self.x) - 1):
+            xx += self.x[i]*self.x[i]
+            xx2 += self.x[i]*(self.x[i+1] - self.x[i]*2 + self.x[i-1])
+        if (xx == 0): return 0
+        if (xx2 > 0): return 0
+        w = math.sqrt(-xx2/(xx*self.dt**2))
+        T = 2*math.pi/w
+        
+        # calc SNR
+        prev_ampl = 0
+        last_ampl = 0
+        i_last_zero = 0
+        ampl2 = 0
+        d_ampl2 = 0
+        for i in range(1, len(self.x)):
+            last_ampl = max(last_ampl, abs(self.x[i]))
+            if (numpy.sign(self.x[i]) != numpy.sign(self.x[i-1])) and (i - i_last_zero > T*0.25):
+                ampl2 += last_ampl ** 2
+                d_ampl2 += (last_ampl - prev_ampl) ** 2
+                prev_ampl = last_ampl
+                last_ampl = 0
+                i_last_zero = i
 
-def EXAMPLE_Direct():
-    """EXAMPLE FOR THE DIRECT PROBLEM"""
-    #Gen_mu_Delta(1, 1.5, 0.0, 1, 0.1, 10000)
-    dt = 0.1
-    Gen_mu_Step(1, 4, 0, 1, dt, 1000)
-    print('Process calculated')
-    #Gen_mu(1, 5, 1, 0.1, 100000)
-    
-    print("Last value X[", len(X), "] = ", X[-1])
-    SaveDataToFile_Column('X(t).dat', X)
-    DrawProcess(dt)
-    
-    #C = CalcCor(4000)
-    #SaveDataToFile_Column('C(t).dat', C)
-    #SaveDataToFile_TwoColumn('C(t).dat', C, 0, dt)
-    #print('Correlator saved')
+        if d_ampl2 == 0:
+            return 0
+        else:
+            return ampl2/d_ampl2
 
-def EXAMPLE_Inverse():
-    """EXAMPLE FOR THE INVERSE PROBLEM"""
-    # fill the correlator list by a desired function
-    t_max = 10.0    #maximum time of correlations
-    Nc = 100        #number of correlator values
-    Npoints = 10000 #number of process time points to generate
-    dt = t_max / Nc
-    C = []
-    for nt in range(Nc+1):
-        t = dt*nt
-        C.append((1.0-t)*math.exp(-1.1*t))
+    def variance_by_ansamble(self, t_max, n_ansambles):
+        n_points_prev = self.n_points
+        self.n_points = int(t_max/self.dt)+1
+        variance = [0]*self.n_points
+        for iter in range(n_ansambles):
+            self.generate()
+            for i in range(self.n_points):
+                variance[i] += pow(self.x[i], 2)
+        for i in range(self.n_points):
+            variance[i] /= n_ansambles
 
-    # Generating the X(t) values
-    Gen_Cor(C, Npoints)
-    SaveDataToFile_Column('X(t).dat', X)
+        self.n_points = n_points_prev
+        return variance
 
-    # Proove the correlator
-    Ccalc = CalcCor(Nc)
-    SaveDataToFile_Column('C(t).dat', Ccalc)
+    def draw_process(self):
+        t = numpy.arange(0, len(self.x)*self.dt, self.dt)
+        plt.plot(t, self.x)
+        plt.xlabel('t')
+        plt.ylabel('X')
 
+###======================= EXAMPLES ===========================================
 
-def EXAMPLE_CalcCorAnalytic():
-    #Fill mu(t)
-    T_mu = 1.0
-    Nmu = 100
-    dt = T_mu / Nmu
-    
-    mu = []
-    mu.append(0.0)
-    mu0 = 0.1
-    for nt in range(Nmu+1):
-        t = nt * dt
-        mu.append(mu0)
-    
-    t_max = 100.0
-    nu = 0.0
-    C = Calc_Cor_Norm(mu, nu, dt, int(t_max/dt))
-    SaveDataToFile_Column('C(t).dat', C)
+## ------------- generate the process with given parameters (direct problem) --
 
-#====================== MAIN ===========================================
+#brownian motion
+proc_brownian = Process(memory_type = Process.MemoryType.NULL, dt = 0.1, n_points = 1000)
+proc_brownian.generate()
+proc_brownian.draw_process()
 
-EXAMPLE_Direct()
-#EXAMPLE_Inverse
-#EXAMPLE_CalcCorAnalytic
+#Ornstein–Uhlenbeck process
+proc_ornuhl = Process(memory_type = Process.MemoryType.NULL, nu = 1, dt = 0.1, n_points = 1000)
+proc_ornuhl.generate()
+proc_ornuhl.draw_process()
+
+#process with stepwise non-local memory
+proc_mem = Process(memory_type=Process.MemoryType.STEP, T=1, mu0=4.5, nu=0, sigma=1, dt=0.1, n_points=1000)
+proc_mem.generate()
+proc_mem.draw_process()
+#save the process to file
+proc_mem.save_process('process.dat')
+
+## ------------- generate the process with given autocorrelation (inverse problem) --
+
+# fill the correlator list by a desired function
+T_CORR = 10.0   #maximum time of correlations
+N_CORR = 100    #number of correlator values
+dt = T_CORR/N_CORR
+C = []
+for nt in range(N_CORR+1):
+    t = dt*nt
+    C.append(10*(1.0-t)*math.exp(-1.1*t))
+
+# Generating the process
+proc = Process(n_points = 1000, dt = dt)
+proc.gen_by_corr(C)
+proc.draw_process()
+plt.show()
+
+#input()
