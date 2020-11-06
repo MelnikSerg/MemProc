@@ -230,7 +230,7 @@ class Process:
         return variance
 
     def draw_process(self):
-        t = numpy.arange(0, len(self.x)*self.dt, self.dt)
+        t = numpy.arange(0, (len(self.x)-0.5)*self.dt, self.dt)
         plt.plot(t, self.x)
         plt.xlabel('t')
         plt.ylabel('X')
